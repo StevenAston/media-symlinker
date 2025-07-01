@@ -1,4 +1,4 @@
-# hashing.py
+# hashing2.py
 
 import logging
 import os
@@ -86,7 +86,7 @@ def hash_unhashed_files_per_drive(sort_by='file_size', sort_order='ascending'):
             executor.submit(_process_drive_list, item, get_hsl_color_for_bar(i, num_drives)): item[0] 
             for i, item in enumerate(sorted(files_by_drive.items()))
         }
-
+        
         logging.debug(f"HASH_MAIN: Waiting for {len(future_to_drive)} futures to complete.")
         for future in as_completed(future_to_drive):
             drive = future_to_drive[future]

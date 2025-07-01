@@ -15,11 +15,11 @@ def setup_test_db_with_mock_files():
     initialize_database()
     with get_db_connection() as conn:
         # Use os.path.join for consistency
-        full_path = os.path.join(config.DOWNLOADS_PATH, "Some.Movie.2023.1080p.mkv")
+        full_path = os.path.join(config.VIRTUAL_DOWNLOADS_PATH, "Some.Movie.2023.1080p.mkv")
         conn.execute("""
             INSERT INTO files (full_path, filename, directory, scan_source, file_size, modified_date, is_symlink)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (full_path, 'Some.Movie.2023.1080p.mkv', config.DOWNLOADS_PATH, 'downloads', 12345, 0, 0))
+        """, (full_path, 'Some.Movie.2023.1080p.mkv', config.VIRTUAL_DOWNLOADS_PATH, 'downloads', 12345, 0, 0))
         conn.commit()
 
 def test_update_db_with_torrent_info():
@@ -34,7 +34,7 @@ def test_update_db_with_torrent_info():
     mock_torrent.name = 'Some.Movie.2023'
     # --- THE FIX ---
     # Do not add a trailing slash. Let os.path.join handle it.
-    mock_torrent.save_path = config.DOWNLOADS_PATH
+    mock_torrent.save_path = config.VIRTUAL_DOWNLOADS_PATH
     mock_torrent.category = 'movies'
     mock_torrent.tags = ['1080p', 'x265']
     
@@ -54,7 +54,7 @@ def test_update_db_with_torrent_info():
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 # Query by the known path to be certain
-                path_to_check = os.path.join(config.DOWNLOADS_PATH, "Some.Movie.2023.1080p.mkv")
+                path_to_check = os.path.join(config.VIRTUAL_DOWNLOADS_PATH, "Some.Movie.2023.1080p.mkv")
                 result = conn.execute("SELECT * FROM files WHERE full_path = ?", (path_to_check,)).fetchone()
                 
                 assert 'torrent_hash' in result.keys()

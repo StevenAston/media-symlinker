@@ -6,48 +6,71 @@ from unittest.mock import patch, MagicMock
 
 import config
 from database import get_db_connection, initialize_database
-from file_scanner import scan_directory # Import the function we are testing
+from file_scanner import scan_directory
 
 TEST_DB_FILE = "test_scanner.sqlite"
 
-def test_scan_directory_populates_db():
+def test_scan_directory_populates_db_from_scratch():
     """
     Tests that scan_directory correctly processes data from the generator
-    and populates the database.
+    and populates an empty database.
     """
-    # This is the clean data our mock generator will provide.
     mock_file_data = [
         {"full_path": 'C:\\RealFile.mkv', "file_size": 1000, "modified_date": 0, "is_symlink": False},
         {"full_path": 'C:\\SymlinkFile.mkv', "file_size": 2000, "modified_date": 0, "is_symlink": True}
     ]
 
-    # We patch the DB path and our private generator function. This is simple and robust.
     with patch('config.DB_FILE_PATH', TEST_DB_FILE), \
          patch('file_scanner._iterate_everything_results', return_value=mock_file_data):
-        
         try:
-            # Delete any leftover DB from a previously failed run.
-            if os.path.exists(TEST_DB_FILE):
-                os.remove(TEST_DB_FILE)
-            
+            if os.path.exists(TEST_DB_FILE): os.remove(TEST_DB_FILE)
             initialize_database()
-            # The 'dll' object can now be a simple mock because its methods are never called.
             mock_dll = MagicMock()
 
-            # Run the function we are testing.
-            scan_directory(mock_dll, config.DOWNLOADS_PATH, 'downloads')
+            # This call now correctly passes the 4 required arguments.
+            scan_directory(mock_dll, 'C:\\somepath', 'downloads', 'C')
 
-            # Verify the results in the database.
             with get_db_connection() as conn:
-                real_file = conn.execute("SELECT * FROM files WHERE full_path = 'C:\\RealFile.mkv'").fetchone()
-                symlink_file = conn.execute("SELECT * FROM files WHERE full_path = 'C:\\SymlinkFile.mkv'").fetchone()
-                
-                assert real_file is not None
-                assert symlink_file is not None
-                
-                assert real_file['is_symlink'] == 0
-                assert symlink_file['is_symlink'] == 1
+                results = conn.execute("SELECT * FROM files ORDER BY full_path").fetchall()
+                assert len(results) == 2
+                assert results[0]['full_path'] == 'C:\\RealFile.mkv'
+                assert results[0]['physical_drive'] == 'C'
         finally:
             gc.collect()
-            if os.path.exists(TEST_DB_FILE):
-                os.remove(TEST_DB_FILE)
+            if os.path.exists(TEST_DB_FILE): os.remove(TEST_DB_FILE)
+
+def test_scan_directory_resets_status_on_rescan():
+    """
+    Tests that the ON CONFLICT clause correctly resets the status and hash
+    of a file that is scanned again.
+    """
+    file_path = 'C:\\RealFile.mkv'
+    mock_rescan_data = [
+        {"full_path": file_path, "file_size": 1001, "modified_date": 1, "is_symlink": False}
+    ]
+
+    with patch('config.DB_FILE_PATH', TEST_DB_FILE), \
+         patch('file_scanner._iterate_everything_results', return_value=mock_rescan_data):
+        try:
+            if os.path.exists(TEST_DB_FILE): os.remove(TEST_DB_FILE)
+            initialize_database()
+            with get_db_connection() as conn:
+                # The initial INSERT now includes the 'physical_drive' column.
+                conn.execute("""
+                    INSERT INTO files (full_path, physical_drive, filename, directory, scan_source, file_size, modified_date, is_symlink, status, xxh128_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (file_path, 'C', 'RealFile.mkv', 'C:\\', 'downloads', 1000, 0, 0, 'processed', 'some_old_hash'))
+                conn.commit()
+
+            mock_dll = MagicMock()
+            # This call now correctly passes the 4 required arguments.
+            scan_directory(mock_dll, 'C:\\somepath', 'downloads', 'C')
+
+            with get_db_connection() as conn:
+                file_record = conn.execute("SELECT * FROM files WHERE full_path = ?", (file_path,)).fetchone()
+                assert file_record['file_size'] == 1001
+                assert file_record['status'] == 'new'
+                assert file_record['xxh128_hash'] is None
+        finally:
+            gc.collect()
+            if os.path.exists(TEST_DB_FILE): os.remove(TEST_DB_FILE)

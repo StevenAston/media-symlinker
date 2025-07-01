@@ -25,7 +25,7 @@ def update_db_with_torrent_info():
     if not client: return
 
     logging.info("Fetching torrent list from qBittorrent...")
-    _add_torrent_columns_to_db()
+    # _add_torrent_columns_to_db()
 
     logging.info("Resetting existing torrent information in the database...")
     with get_db_connection() as conn:

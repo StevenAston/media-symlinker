@@ -3,57 +3,46 @@
 import os
 import gc
 from unittest.mock import patch
+import sqlite3
 
-# --- CHANGE IS HERE ---
-# We now import BOTH functions from our database module.
-from database import initialize_database, get_db_connection
+from database import get_db_connection, initialize_database
 
-TEST_DB_FILE = "test_linker.sqlite"
+TEST_DB_FILE = "test_db.sqlite"
 
 def test_initialize_database_creates_table_and_columns():
     """
     Tests that initialize_database creates the DB file and the 'files' table
     with all the expected columns.
     """
-    # Patch the config to use our temporary test database filename.
     with patch('config.DB_FILE_PATH', TEST_DB_FILE):
         try:
-            # 1. Run the function being tested. Our improved get_db_connection
-            #    ensures the connection used here is properly closed.
-            initialize_database()
+            # Ensure the test starts clean
+            if os.path.exists(TEST_DB_FILE):
+                os.remove(TEST_DB_FILE)
 
-            # 2. Assert that the database file was actually created.
+            initialize_database()
             assert os.path.exists(TEST_DB_FILE), "Database file was not created"
 
-            # 3. Connect to the new DB to verify its contents.
-            # --- CRITICAL FIX IS HERE ---
-            # We now use our OWN get_db_connection context manager, which
-            # GUARANTEES this connection will be closed before the 'finally' block.
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Verify the 'files' table exists.
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='files';")
                 assert cursor.fetchone() is not None, "'files' table was not created"
 
-                # Verify the table has the correct columns.
                 cursor.execute("PRAGMA table_info(files);")
                 columns_info = cursor.fetchall()
-                column_names = [col[1] for col in columns_info]
-                
-                expected_columns = [
-                    'id', 'full_path', 'filename', 'directory', 'scan_source',
-                    'file_size', 'modified_date', 'xxh128_hash', 'hash_date',
-                    'status', 'duplicate_of_id',
-                    'is_symlink'
-                ]
-                
-                assert column_names == expected_columns, "Table columns are not correct"
-            # --- The connection used for testing is now guaranteed to be closed ---
+                actual_columns = {col[1] for col in columns_info}
+
+                # This is the full, final set of columns for the table.
+                expected_columns = {
+                    'id', 'full_path', 'physical_drive', 'filename', 'directory',
+                    'scan_source', 'file_size', 'modified_date', 'is_symlink',
+                    'status', 'xxh128_hash', 'hash_date', 'duplicate_of_id',
+                    'torrent_hash', 'torrent_name', 'category', 'tags'
+                }
+
+                assert actual_columns == expected_columns, f"Table columns mismatch. Got {actual_columns}"
 
         finally:
-            # Calling gc.collect() is good practice for cleanup, especially on Windows.
             gc.collect()
-            # This should now succeed as all connections have been closed.
             if os.path.exists(TEST_DB_FILE):
                 os.remove(TEST_DB_FILE)

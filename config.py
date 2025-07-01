@@ -2,10 +2,14 @@
 
 import os
 
+# Get the directory where this config.py file is located.
+# This makes our path references robust and independent of where the script is run from.
+_project_root = os.path.dirname(os.path.abspath(__file__))
+
 # --- Core Paths ---
 # IMPORTANT: Replace these placeholder paths with the actual paths on your system.
 # Use forward slashes '/' for paths to avoid issues, even on Windows.
-PHYSICAL_PATHS = {
+PHYSICAL_DRIVE_PATHS = {
     'D': 'D:\\PoolPart.bff64b92-d745-4ff9-933b-ae092c32cfc7',
     'E': 'E:\\PoolPart.46e9a8f6-1019-4e8f-af54-ec2673cb3a28',
     'F': 'F:\\PoolPart.c3eea89e-5163-4f85-89fa-8720729cda69',
@@ -18,19 +22,16 @@ PHYSICAL_PATHS = {
     'Z': 'Z:\\PoolPart.352400c4-6432-4d03-8f76-aa21f2591ba3'
 }
 
-VIRTUAL_DOWNLOADS_PATH = "M:/Downloads"
-VIRTUAL_MEDIA_PATH = "M:/Media"
+VIRTUAL_DOWNLOADS_PATH = "M:\\Downloads"
+VIRTUAL_MEDIA_PATH = "M:\\Media"
 
 # --- Database ---
-DB_FILE_PATH = "media_linker.sqlite"
+DB_FILE_PATH = os.path.join(_project_root, "media_linker.sqlite")
 
 # --- Logging ---
-LOG_FILE_PATH = "media_linker.log"
+LOG_FILE_PATH = os.path.join(_project_root, "media_linker.log")
 
 # --- Hashing ---
-# The margin of error for comparing file sizes before hashing.
-# A value of 0.01 means files must be within 1% of each other's size to be considered potential duplicates.
-FILE_SIZE_SIMILARITY_MARGIN = 0.01
 # Number of parallel processes to use for hashing files.
 # A good starting point is the number of CPU cores you have. 16 is aggressive and I/O limited.
 HASHING_WORKERS = 10
