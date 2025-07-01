@@ -48,6 +48,7 @@ def main(args):
         
         logging.info("--- Step 4: Syncing with qBittorrent ---")
         update_db_with_torrent_info()
+<<<<<<< Updated upstream
     
 def signal_handler(sig, frame):
     """
@@ -62,6 +63,8 @@ def signal_handler(sig, frame):
     else:
         logging.warning("Multiple Ctrl+C detected. Forcing exit.")
         sys.exit(1)
+=======
+>>>>>>> Stashed changes
 
 if __name__ == '__main__':
     # Shutdown signal handler
