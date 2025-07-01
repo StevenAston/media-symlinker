@@ -2,6 +2,8 @@
 
 import logging
 import argparse
+import signal
+import sys
 
 import logger_setup
 from database import initialize_database, get_db_connection
@@ -16,7 +18,7 @@ def main(args):
     """Main application logic."""
     logger_setup.setup_logging(args.verbose)
     
-    # --- NEW: Parse the --order-by argument ---
+    # Parse the --order-by argument ---
     sort_by = 'file_size' # Default sort column
     sort_order = 'ascending' # Default sort order
     if args.order_by:
@@ -47,14 +49,27 @@ def main(args):
         logging.info("--- Step 4: Syncing with qBittorrent ---")
         update_db_with_torrent_info()
     
-    # ... (the rest of the file remains the same)
-    # ...
+def signal_handler(sig, frame):
+    """
+    This function will be called when Ctrl+C is pressed.
+    It sets the global shutdown event in the hashing module.
+    """
+    from hashing import SHUTDOWN_EVENT
+    if not SHUTDOWN_EVENT.is_set():
+        print() # Print a newline to not overwrite the current progress bar
+        logging.warning("Ctrl+C detected! Initiating graceful shutdown. Please wait...")
+        SHUTDOWN_EVENT.set()
+    else:
+        logging.warning("Multiple Ctrl+C detected. Forcing exit.")
+        sys.exit(1)
 
 if __name__ == '__main__':
+    # Shutdown signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+
     parser = argparse.ArgumentParser(description="Find and symlink duplicate media files.")
     parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase logging verbosity.")
     
-    # --- NEW ARGUMENT DEFINITION ---
     parser.add_argument(
         '-o', '--order-by',
         type=str,

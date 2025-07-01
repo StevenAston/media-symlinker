@@ -1,0 +1,130 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.4.1, pluggy-1.6.0 -- C:\Software\python\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\steve\Development\media-symlinker
+collecting ... collected 1 item
+
+tests/test_hashing.py::test_main_hashing_function FAILED
+
+================================== FAILURES ===================================
+_________________________ test_main_hashing_function __________________________
+
+mock_ThreadPoolExecutor = <MagicMock name='ThreadPoolExecutor' id='2134175755504'>
+mock_as_completed = <MagicMock name='as_completed' id='2134186188416'>
+
+    @patch('hashing.as_completed')
+    @patch('hashing.ThreadPoolExecutor')
+    def test_main_hashing_function(mock_ThreadPoolExecutor, mock_as_completed):
+        """
+        This test validates the main orchestrator function by mocking the execution flow.
+        """
+        # 1. Mock the executor instance
+        mock_executor_instance = mock_ThreadPoolExecutor.return_value
+    
+        # 2. Simulate the `submit` call. We don't need it to do anything complex,
+        #    just to return a mock future object that we can identify.
+        mock_future = MagicMock()
+        mock_executor_instance.submit.return_value = mock_future
+    
+        # 3. THE CRITICAL FIX: Configure the mock for `as_completed`.
+        #    When the application calls `as_completed`, we will return a list
+        #    containing our single mock_future. This ensures the loop runs once
+        #    with the exact object we can track.
+        mock_as_completed.return_value = [mock_future]
+    
+        # 4. We now need to patch the dictionary *before* the function call,
+        #    so we will control the `future_to_drive` dictionary directly.
+        #    We also patch the result of our mock future.
+>       with patch.dict('hashing.future_to_drive', {mock_future: 'D'}), \
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             patch.object(mock_future, 'result', return_value=[{"id": 1, "hash": "a_correct_hash", "size": 1000}]):
+
+tests\test_hashing.py:36: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Software\python\Lib\unittest\mock.py:1923: in __enter__
+    self._patch_dict()
+C:\Software\python\Lib\unittest\mock.py:1930: in _patch_dict
+    self.in_dict = pkgutil.resolve_name(self.in_dict)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'hashing.future_to_drive'
+
+    def resolve_name(name):
+        """
+        Resolve a name to an object.
+    
+        It is expected that `name` will be a string in one of the following
+        formats, where W is shorthand for a valid Python identifier and dot stands
+        for a literal period in these pseudo-regexes:
+    
+        W(.W)*
+        W(.W)*:(W(.W)*)?
+    
+        The first form is intended for backward compatibility only. It assumes that
+        some part of the dotted name is a package, and the rest is an object
+        somewhere within that package, possibly nested inside other objects.
+        Because the place where the package stops and the object hierarchy starts
+        can't be inferred by inspection, repeated attempts to import must be done
+        with this form.
+    
+        In the second form, the caller makes the division point clear through the
+        provision of a single colon: the dotted name to the left of the colon is a
+        package to be imported, and the dotted name to the right is the object
+        hierarchy within that package. Only one import is needed in this form. If
+        it ends with the colon, then a module object is returned.
+    
+        The function will return an object (which might be a module), or raise one
+        of the following exceptions:
+    
+        ValueError - if `name` isn't in a recognised format
+        ImportError - if an import failed when it shouldn't have
+        AttributeError - if a failure occurred when traversing the object hierarchy
+                         within the imported package to get to the desired object.
+        """
+        global _NAME_PATTERN
+        if _NAME_PATTERN is None:
+            # Lazy import to speedup Python startup time
+            import re
+            dotted_words = r'(?!\d)(\w+)(\.(?!\d)(\w+))*'
+            _NAME_PATTERN = re.compile(f'^(?P<pkg>{dotted_words})'
+                                       f'(?P<cln>:(?P<obj>{dotted_words})?)?$',
+                                       re.UNICODE)
+    
+        m = _NAME_PATTERN.match(name)
+        if not m:
+            raise ValueError(f'invalid format: {name!r}')
+        gd = m.groupdict()
+        if gd.get('cln'):
+            # there is a colon - a one-step import is all that's needed
+            mod = importlib.import_module(gd['pkg'])
+            parts = gd.get('obj')
+            parts = parts.split('.') if parts else []
+        else:
+            # no colon - have to iterate to find the package boundary
+            parts = name.split('.')
+            modname = parts.pop(0)
+            # first part *must* be a module/package.
+            mod = importlib.import_module(modname)
+            while parts:
+                p = parts[0]
+                s = f'{modname}.{p}'
+                try:
+                    mod = importlib.import_module(s)
+                    parts.pop(0)
+                    modname = s
+                except ImportError:
+                    break
+        # if we reach this point, mod is the module, already imported, and
+        # parts is the list of parts in the object hierarchy to be traversed, or
+        # an empty list if just the module is wanted.
+        result = mod
+        for p in parts:
+>           result = getattr(result, p)
+                     ^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'hashing' has no attribute 'future_to_drive'
+
+C:\Software\python\Lib\pkgutil.py:528: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_hashing.py::test_main_hashing_function - AttributeError: module 'hashing' has no attribute 'future_to_drive'
+============================== 1 failed in 0.50s ==============================

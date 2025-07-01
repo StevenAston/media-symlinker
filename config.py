@@ -1,6 +1,9 @@
 # config.py
 
 import os
+import threading
+
+SHUTDOWN_EVENT = threading.Event()
 
 # Get the directory where this config.py file is located.
 # This makes our path references robust and independent of where the script is run from.
