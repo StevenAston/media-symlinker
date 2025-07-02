@@ -11,17 +11,25 @@ from database import get_db_connection
 from color_utils import get_hsl_color_for_bar
 
 def _hash_file_worker(file_info):
-    # This function is not the problem, but we'll keep it simple.
+    """Worker function to hash a single file. Now checks for shutdown."""
+    if config.SHUTDOWN_EVENT.is_set():
+        return None
     file_id, file_path, file_size = file_info
     try:
         import xxhash
         h = xxhash.xxh128()
         with open(file_path, 'rb', buffering=262144) as f:
             while chunk := f.read(262144):
+                if config.SHUTDOWN_EVENT.is_set():
+                    logging.debug(f"Shutdown requested during hashing of {file_path}.")
+                    return None
                 h.update(chunk)
         return {"id": file_id, "hash": h.hexdigest(), "size": file_size}
+    except FileNotFoundError:
+        logging.debug(f"File not found during hashing: {file_path}")
+        return None
     except Exception as e:
-        logging.error(f"WORKER ERROR for {file_path}: {e}")
+        logging.error(f"Could not hash file {file_path}: {e}")
         return None
 
 def _process_drive_list(drive_info, bar_color: str):
@@ -35,7 +43,10 @@ def _process_drive_list(drive_info, bar_color: str):
 
     with pbar:
         for file_info in drive_files:
-            if config.SHUTDOWN_EVENT.is_set(): break
+            if config.SHUTDOWN_EVENT.is_set():
+                logging.warning(f"Shutdown detected, stopping hashing for drive {drive_letter}.")
+                break # Exit the loop for this drive
+            
             res = _hash_file_worker(file_info)
             if res:
                 results.append(res)
@@ -45,16 +56,21 @@ def _process_drive_list(drive_info, bar_color: str):
     return results
 
 def hash_unhashed_files_per_drive(sort_by='file_size', sort_order='ascending'):
-    logging.debug("MAIN_HASHER: Starting.")
+    """The main orchestrator function with all features."""
+    logging.info(f"Starting per-disk hashing process, ordering by {sort_by} {sort_order}.")
     
     try:
         with get_db_connection() as conn:
             order_direction = "ASC" if sort_order == 'ascending' else "DESC"
-            sql = f"SELECT id, full_path, physical_drive, file_size FROM files WHERE xxh128_hash IS NULL AND is_symlink = 0 ORDER BY {sort_by} {order_direction}"
-            files_to_hash = conn.execute(sql).fetchall()
+            sql_get_unhashed = f"""
+                SELECT id, full_path, physical_drive, file_size FROM files 
+                WHERE xxh128_hash IS NULL AND is_symlink = 0 ORDER BY {sort_by} {order_direction}
+            """
+            files_to_hash = conn.execute(sql_get_unhashed).fetchall()
             logging.debug(f"MAIN_HASHER: Found {len(files_to_hash)} files to hash from DB.")
     except Exception as e:
         logging.error(f"MAIN_HASHER: DB query failed: {e}", exc_info=True)
+        logging.error(f"Failed to get list of unhashed files: {e}", exc_info=True)
         return
 
     if not files_to_hash:
@@ -63,32 +79,60 @@ def hash_unhashed_files_per_drive(sort_by='file_size', sort_order='ascending'):
 
     files_by_drive = defaultdict(list)
     for f in files_to_hash:
-        files_by_drive[f['physical_drive']].append((f['id'], f['full_path'], f['file_size']))
-    logging.debug(f"MAIN_HASHER: Grouped files into {len(files_by_drive)} drives.")
+        drive = f['physical_drive']
+        if drive:
+            files_by_drive[drive].append((f['id'], f['full_path'], f['file_size']))
+
+    num_drives = len(files_by_drive)
+    logging.info(f"Files are spread across {num_drives} physical drives: {list(files_by_drive.keys())}")
 
     update_data = []
-    max_workers = min(len(files_by_drive), config.HASHING_WORKERS)
+    max_drive_workers = min(num_drives, config.HASHING_WORKERS)
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max_drive_workers) as executor:
+        drive_jobs = []
+        sorted_drives = sorted(files_by_drive.items())
+        
+        for i, (drive_letter, files) in enumerate(sorted_drives):
+            color = get_hsl_color_for_bar(i, num_drives)
+            drive_jobs.append({'drive_info': (drive_letter, files), 'bar_color': color})
+
         future_to_drive = {
-            executor.submit(_process_drive_list, item, get_hsl_color_for_bar(i, len(files_by_drive))): item[0] 
-            for i, item in enumerate(sorted(files_by_drive.items()))
+            executor.submit(_process_drive_list, **job): job['drive_info'][0] 
+            for job in drive_jobs
         }
         
-        logging.debug(f"MAIN_HASHER: Submitted {len(future_to_drive)} jobs. Waiting for results...")
-        for future in as_completed(future_to_drive):
-            drive = future_to_drive[future]
-            try:
-                drive_results = future.result()
-                if drive_results:
-                    logging.debug(f"MAIN_HASHER: Got {len(drive_results)} results from drive {drive}.")
-                    fixed_results = [(res['hash'], res['id']) for res in drive_results]
-                    update_data.extend(fixed_results)
-            except Exception as exc:
-                logging.error(f"MAIN_HASHER: Drive {drive} future generated an exception: {exc}", exc_info=True)
+        logging.info(f"Hashing started for {num_drives} drives. Press Ctrl+C to gracefully shut down and save progress.")
+        try:
+            # This loop waits for futures to complete.
+            for future in as_completed(future_to_drive):
+                # If a shutdown is requested while waiting, break the loop.
+                if config.SHUTDOWN_EVENT.is_set():
+                    break
+                drive = future_to_drive[future]
+                try:
+                    drive_results = future.result()
+                    if drive_results:
+                        fixed_results = [(res['hash'], res['id']) for res in drive_results]
+                        update_data.extend(fixed_results)
+                    logging.info(f"Finished processing drive {drive}.")
+                except Exception as exc:
+                    logging.error(f"Drive {drive} generated an exception: {exc}", exc_info=True)
+        
+        except KeyboardInterrupt:
+            # This is the primary catch for Ctrl+C
+            config.SHUTDOWN_EVENT.set()
+            logging.warning("Ctrl+C detected! Cancelling pending tasks...")
+            # Actively cancel futures that have not started running yet.
+            for future in future_to_drive:
+                future.cancel()
 
-    logging.debug(f"MAIN_HASHER: All futures complete. Total results to update in DB: {len(update_data)}")
-    if not update_data: return
+    if config.SHUTDOWN_EVENT.is_set():
+        logging.warning("Shutdown complete. Saving partial progress...")
+    
+    if not update_data:
+        logging.info("No new hashes were generated in this run.")
+        return
 
     logging.info(f"Updating database with {len(update_data)} new file hashes...")
     update_sql = "UPDATE files SET xxh128_hash = ?, status = 'hashed', hash_date = unixepoch() WHERE id = ?"
